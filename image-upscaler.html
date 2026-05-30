@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Image Upscaler</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e0f;--surface:#18181b;--surface2:#222226;--border:#2e2e34;
+  --accent:#c8f05e;--text:#f0efe8;--muted:#888780;
+}
+body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:2.5rem 1.5rem 4rem}
+header{text-align:center;margin-bottom:2rem}
+h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(2rem,5vw,3rem);letter-spacing:-0.03em;color:var(--accent);line-height:1.1}
+.subtitle{font-size:0.75rem;color:var(--muted);margin-top:0.5rem;letter-spacing:0.08em;text-transform:uppercase}
+.panel{width:100%;max-width:900px}
+
+/* model status bar */
+.model-bar{display:flex;align-items:center;gap:10px;background:var(--surface);border:0.5px solid var(--border);border-radius:10px;padding:0.65rem 1rem;margin-bottom:1rem;font-size:0.75rem}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background 0.3s}
+.dot.loading{background:#f59e0b;animation:pulse 1s infinite}
+.dot.ready{background:#22c55e}
+.dot.error{background:#ef4444}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.model-label{color:var(--muted);flex:1}
+.model-name{color:var(--accent);font-weight:500}
+
+/* dropzone */
+.dropzone{border:1.5px dashed var(--border);border-radius:16px;padding:2rem;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;background:var(--surface);position:relative;margin-bottom:1rem}
+.dropzone:hover,.dropzone.drag-over{border-color:var(--accent);background:#1c1f14}
+.dropzone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;z-index:2}
+.drop-icon{font-size:2rem;display:block;margin-bottom:0.5rem}
+.drop-label{font-size:0.82rem;color:var(--muted)}
+.drop-label strong{color:var(--accent)}
+#previewWrap{display:none;position:relative}
+#previewImg{width:100%;border-radius:8px;display:block;max-height:380px;object-fit:contain}
+.preview-meta{margin-top:0.5rem;font-size:0.7rem;color:var(--muted);text-align:center}
+.change-badge{position:absolute;top:8px;right:8px;background:rgba(14,14,15,0.8);border-radius:6px;padding:3px 8px;font-size:0.65rem;color:var(--accent);pointer-events:none}
+
+/* tile warning */
+.tile-info{font-size:0.72rem;color:var(--muted);background:var(--surface);border:0.5px solid var(--border);border-radius:8px;padding:0.5rem 0.85rem;margin-bottom:0.75rem;display:none}
+.tile-info span{color:var(--accent)}
+
+/* btn */
+.btn-process{width:100%;padding:0.9rem;background:var(--accent);color:#0e0e0f;border:none;border-radius:10px;font-family:'DM Mono',monospace;font-size:0.88rem;font-weight:500;letter-spacing:0.05em;cursor:pointer;transition:background 0.15s,transform 0.1s;text-transform:uppercase}
+.btn-process:hover{background:#d8ff6a}
+.btn-process:active{transform:scale(0.98)}
+.btn-process:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;transform:none}
+
+/* progress */
+.progress-wrap{height:3px;background:var(--border);border-radius:2px;margin:0.8rem 0;overflow:hidden;display:none}
+.progress-bar{height:100%;background:var(--accent);border-radius:2px;transition:width 0.25s;width:0%}
+.status-text{font-size:0.75rem;color:var(--muted);text-align:center;min-height:1.2em;margin-bottom:0.5rem}
+
+/* results */
+.results{display:none;margin-top:1.5rem}
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:600px){.compare-grid{grid-template-columns:1fr}}
+.img-panel{background:var(--surface);border:0.5px solid var(--border);border-radius:12px;overflow:hidden}
+.img-panel-header{padding:0.55rem 1rem;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);border-bottom:0.5px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.tag{background:var(--surface2);color:var(--accent);border-radius:4px;padding:2px 7px;font-size:0.62rem;letter-spacing:0.08em}
+.img-panel img,.img-panel canvas{width:100%;height:auto;display:block}
+.download-btn{display:block;width:100%;padding:0.6rem;background:var(--surface2);color:var(--accent);border:none;font-family:'DM Mono',monospace;font-size:0.75rem;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;transition:background 0.15s;text-align:center;border-top:0.5px solid var(--border)}
+.download-btn:hover{background:#1c1f14}
+.stats{display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.75rem}
+.stat{background:var(--surface);border:0.5px solid var(--border);border-radius:8px;padding:0.55rem 0.9rem;font-size:0.7rem}
+.stat-label{color:var(--muted)}
+.stat-val{color:var(--accent);font-size:0.95rem;font-weight:500;margin-top:2px}
+
+/* slide compare */
+.toggle-compare{background:var(--surface2);border:0.5px solid var(--border);border-radius:8px;color:var(--muted);font-family:'DM Mono',monospace;font-size:0.72rem;padding:0.45rem 0.9rem;cursor:pointer;margin-top:0.75rem;letter-spacing:0.05em;transition:color 0.15s,border-color 0.15s}
+.toggle-compare:hover{color:var(--accent);border-color:var(--accent)}
+.slider-compare{position:relative;overflow:hidden;border-radius:0;user-select:none;cursor:col-resize;display:none}
+.slider-compare canvas{width:100%;height:auto;display:block}
+.slider-overlay{position:absolute;top:0;left:0;height:100%;overflow:hidden;pointer-events:none}
+.slider-overlay canvas{display:block}
+.slider-line{position:absolute;top:0;height:100%;width:2px;background:var(--accent);pointer-events:none}
+.slider-handle{position:absolute;top:50%;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;color:#0e0e0f;font-weight:bold;pointer-events:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AI Upscaler</h1>
+  <p class="subtitle">Real neural network · SwinIR x4 · runs entirely in your browser</p>
+</header>
+
+<div class="panel">
+
+  <div class="model-bar">
+    <div class="dot loading" id="modelDot"></div>
+    <span class="model-label">Model: <span class="model-name">SwinIR-M x4 (Real-World SR)</span></span>
+    <span id="modelStatus" style="font-size:0.7rem;color:var(--muted)">Downloading… (~50MB, cached after first load)</span>
+  </div>
+
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" accept="image/*">
+    <div id="dropPlaceholder">
+      <span class="drop-icon">⬆</span>
+      <p class="drop-label"><strong>Click or drag</strong> an image here</p>
+      <p class="drop-label" style="margin-top:0.3rem;font-size:0.7rem">JPG · PNG · WebP supported</p>
+    </div>
+    <div id="previewWrap">
+      <img id="previewImg" alt="preview">
+      <div class="preview-meta" id="previewMeta"></div>
+      <div class="change-badge">click to change</div>
+    </div>
+  </div>
+
+  <div class="tile-info" id="tileInfo">
+    Image is large — will be processed in <span id="tileCount">?</span> tiles and stitched together.
+  </div>
+
+  <button class="btn-process" id="processBtn" disabled>↑ Upscale 4× with AI</button>
+  <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+  <p class="status-text" id="statusText"></p>
+
+  <div class="results" id="results">
+    <div class="compare-grid">
+      <div class="img-panel">
+        <div class="img-panel-header">Original <span class="tag" id="origSize">—</span></div>
+        <img id="origImg" alt="original">
+      </div>
+      <div class="img-panel">
+        <div class="img-panel-header">AI Enhanced 4× <span class="tag" id="outSize">—</span></div>
+        <canvas id="outCanvas"></canvas>
+        <button class="download-btn" id="dlBtn">↓ Download PNG</button>
+      </div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <button class="toggle-compare" id="toggleCompare">▶ Slide-compare view</button>
+    <div class="img-panel" style="margin-top:0.75rem;display:none" id="comparePanel">
+      <div class="img-panel-header">Drag to compare <span class="tag">BEFORE / AFTER</span></div>
+      <div class="slider-compare" id="sliderCompare">
+        <canvas id="cmpBase"></canvas>
+        <div class="slider-overlay" id="sliderOverlay"><canvas id="cmpTop"></canvas></div>
+        <div class="slider-line" id="sliderLine"></div>
+        <div class="slider-handle" id="sliderHandle">⇔</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ONNX Runtime Web -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const MODEL_URL = 'https://huggingface.co/rocca/swin-ir-onnx/resolve/main/003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN.onnx';
+const TILE_SIZE = 128;   // input tile size (model trained on 64, we use overlap+tile)
+const TILE_PAD  = 10;    // overlap padding to avoid seams
+const SCALE     = 4;
+
+// ── State ────────────────────────────────────────────────────────────────────
+let onnxSession = null;
+let srcBlob = null;
+let srcImg  = null;
+
+// ── Elements ─────────────────────────────────────────────────────────────────
+const modelDot    = document.getElementById('modelDot');
+const modelStatus = document.getElementById('modelStatus');
+const dropzone    = document.getElementById('dropzone');
+const fileInput   = document.getElementById('fileInput');
+const dropPH      = document.getElementById('dropPlaceholder');
+const previewWrap = document.getElementById('previewWrap');
+const previewImg  = document.getElementById('previewImg');
+const previewMeta = document.getElementById('previewMeta');
+const tileInfo    = document.getElementById('tileInfo');
+const tileCount   = document.getElementById('tileCount');
+const processBtn  = document.getElementById('processBtn');
+const progressWrap= document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+const statusText  = document.getElementById('statusText');
+const results     = document.getElementById('results');
+const origImg     = document.getElementById('origImg');
+const outCanvas   = document.getElementById('outCanvas');
+const dlBtn       = document.getElementById('dlBtn');
+
+// ── ONNX wasm config ─────────────────────────────────────────────────────────
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/';
+ort.env.wasm.proxy = true;
+if (self.crossOriginIsolated) {
+  ort.env.wasm.numThreads = Math.max(1, Math.floor(navigator.hardwareConcurrency / 2));
+}
+
+// ── Load model ───────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    const t = Date.now();
+    onnxSession = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ['wasm'] });
+    const secs = ((Date.now() - t) / 1000).toFixed(1);
+    modelDot.className = 'dot ready';
+    modelStatus.textContent = `Ready (loaded in ${secs}s)`;
+    if (srcBlob) processBtn.disabled = false;
+  } catch(e) {
+    modelDot.className = 'dot error';
+    modelStatus.textContent = 'Failed to load model — check your connection';
+    console.error(e);
+  }
+})();
+
+// ── File handling ─────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadFile(f);
+});
+
+function loadFile(file) {
+  srcBlob = file;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    srcImg = img;
+    previewImg.src = url;
+    previewMeta.textContent = `${img.naturalWidth} × ${img.naturalHeight} px  ·  ${(file.size/1024).toFixed(0)} KB`;
+    dropPH.style.display = 'none';
+    previewWrap.style.display = 'block';
+    results.style.display = 'none';
+    statusText.textContent = 'Image loaded.';
+
+    // Show tile info if large
+    const numTilesW = Math.ceil(img.naturalWidth / TILE_SIZE);
+    const numTilesH = Math.ceil(img.naturalHeight / TILE_SIZE);
+    const total = numTilesW * numTilesH;
+    if (total > 1) {
+      tileCount.textContent = total;
+      tileInfo.style.display = 'block';
+    } else {
+      tileInfo.style.display = 'none';
+    }
+
+    if (onnxSession) processBtn.disabled = false;
+  };
+  img.src = url;
+}
+
+// ── Main process ──────────────────────────────────────────────────────────────
+processBtn.addEventListener('click', async () => {
+  if (!srcImg || !onnxSession) return;
+  processBtn.disabled = true;
+  progressWrap.style.display = 'block';
+  results.style.display = 'none';
+  setProgress(0, 'Preparing image…');
+
+  try {
+    const W = srcImg.naturalWidth;
+    const H = srcImg.naturalHeight;
+
+    // Draw source to offscreen canvas
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width = W; srcCanvas.height = H;
+    srcCanvas.getContext('2d').drawImage(srcImg, 0, 0);
+
+    const OW = W * SCALE;
+    const OH = H * SCALE;
+    outCanvas.width  = OW;
+    outCanvas.height = OH;
+    const outCtx = outCanvas.getContext('2d');
+
+    const numTilesX = Math.ceil(W / TILE_SIZE);
+    const numTilesY = Math.ceil(H / TILE_SIZE);
+    const total = numTilesX * numTilesY;
+    let done = 0;
+
+    for (let ty = 0; ty < numTilesY; ty++) {
+      for (let tx = 0; tx < numTilesX; tx++) {
+
+        // Source tile coords (with padding, clamped)
+        const x0 = Math.max(0, tx * TILE_SIZE - TILE_PAD);
+        const y0 = Math.max(0, ty * TILE_SIZE - TILE_PAD);
+        const x1 = Math.min(W, (tx + 1) * TILE_SIZE + TILE_PAD);
+        const y1 = Math.min(H, (ty + 1) * TILE_SIZE + TILE_PAD);
+        const tw = x1 - x0;
+        const th = y1 - y0;
+
+        // Extract tile pixels
+        const tileData = srcCanvas.getContext('2d').getImageData(x0, y0, tw, th);
+
+        // Convert to float32 CHW [1,3,H,W]
+        const float32 = imageDataToTensor(tileData, tw, th);
+        const tensor = new ort.Tensor('float32', float32, [1, 3, th, tw]);
+
+        setProgress(Math.round(done / total * 85) + 5, `Upscaling tile ${done + 1} / ${total}…`);
+        await tick();
+
+        const res = await onnxSession.run({ input: tensor });
+        const outTensor = res['output'];
+
+        // Convert output tensor back to ImageData
+        const scaledTileCanvas = tensorToCanvas(outTensor, tw * SCALE, th * SCALE);
+
+        // Figure out where to paint (strip padding in output space)
+        const padLeft = (tx * TILE_SIZE - x0) * SCALE;
+        const padTop  = (ty * TILE_SIZE - y0) * SCALE;
+        const destX   = tx * TILE_SIZE * SCALE;
+        const destY   = ty * TILE_SIZE * SCALE;
+        const destW   = Math.min(TILE_SIZE, W - tx * TILE_SIZE) * SCALE;
+        const destH   = Math.min(TILE_SIZE, H - ty * TILE_SIZE) * SCALE;
+
+        outCtx.drawImage(scaledTileCanvas, padLeft, padTop, destW, destH, destX, destY, destW, destH);
+        done++;
+      }
+    }
+
+    setProgress(95, 'Rendering…');
+    await tick();
+
+    // Show results
+    const t0 = Date.now();
+    document.getElementById('origSize').textContent = `${W}×${H}`;
+    document.getElementById('outSize').textContent  = `${OW}×${OH}`;
+    origImg.src = srcImg.src;
+
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="stat-label">Original</div><div class="stat-val">${W}×${H}</div></div>
+      <div class="stat"><div class="stat-label">Upscaled</div><div class="stat-val">${OW}×${OH}</div></div>
+      <div class="stat"><div class="stat-label">Scale</div><div class="stat-val">4×</div></div>
+      <div class="stat"><div class="stat-label">Pixels</div><div class="stat-val">${(OW*OH/1e6).toFixed(1)}MP</div></div>
+      <div class="stat"><div class="stat-label">Tiles</div><div class="stat-val">${total}</div></div>
+    `;
+
+    buildSliderCompare(OW, OH);
+
+    setProgress(100, 'Done!');
+    await tick();
+    results.style.display = 'block';
+    progressWrap.style.display = 'none';
+
+  } catch(e) {
+    statusText.textContent = 'Error: ' + e.message;
+    console.error(e);
+    progressWrap.style.display = 'none';
+  }
+
+  processBtn.disabled = false;
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function setProgress(p, msg) {
+  progressBar.style.width = p + '%';
+  statusText.textContent = msg;
+}
+function tick() { return new Promise(r => setTimeout(r, 0)); }
+
+function imageDataToTensor(imageData, w, h) {
+  const d = imageData.data;
+  const arr = new Float32Array(3 * h * w);
+  const nPx = h * w;
+  for (let i = 0; i < nPx; i++) {
+    arr[i]          = d[i*4]   / 255;   // R
+    arr[i + nPx]    = d[i*4+1] / 255;   // G
+    arr[i + 2*nPx]  = d[i*4+2] / 255;   // B
+  }
+  return arr;
+}
+
+function tensorToCanvas(tensor, w, h) {
+  const data = tensor.data;
+  const nPx  = h * w;
+  const rgba = new Uint8ClampedArray(nPx * 4);
+  for (let i = 0; i < nPx; i++) {
+    rgba[i*4]   = Math.round(Math.min(1, Math.max(0, data[i]))         * 255);
+    rgba[i*4+1] = Math.round(Math.min(1, Math.max(0, data[i + nPx]))   * 255);
+    rgba[i*4+2] = Math.round(Math.min(1, Math.max(0, data[i + 2*nPx])) * 255);
+    rgba[i*4+3] = 255;
+  }
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0);
+  return c;
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+dlBtn.addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.download = 'upscaled-ai.png';
+  a.href = outCanvas.toDataURL('image/png');
+  a.click();
+});
+
+// ── Slide compare ─────────────────────────────────────────────────────────────
+function buildSliderCompare(OW, OH) {
+  const cmpBase = document.getElementById('cmpBase');
+  const cmpTop  = document.getElementById('cmpTop');
+  cmpBase.width = OW; cmpBase.height = OH;
+  cmpTop.width  = OW; cmpTop.height  = OH;
+  // base = upscaled (right side)
+  cmpBase.getContext('2d').drawImage(outCanvas, 0, 0);
+  // top overlay = original stretched to same size (left side, shows before)
+  const t2 = document.createElement('canvas');
+  t2.width = OW; t2.height = OH;
+  t2.getContext('2d').drawImage(srcImg, 0, 0, OW, OH);
+  cmpTop.getContext('2d').drawImage(t2, 0, 0);
+  setSlider(0.5);
+}
+
+let sliderPct = 0.5;
+const sliderCompare = document.getElementById('sliderCompare');
+const sliderOverlay = document.getElementById('sliderOverlay');
+const sliderLine    = document.getElementById('sliderLine');
+const sliderHandle  = document.getElementById('sliderHandle');
+
+function setSlider(pct) {
+  sliderPct = pct;
+  sliderLine.style.left   = (pct * 100) + '%';
+  sliderHandle.style.left = (pct * 100) + '%';
+  const cmpTop = document.getElementById('cmpTop');
+  const cw = cmpTop.width || 1;
+  const ratio = sliderCompare.offsetWidth / cw;
+  sliderOverlay.style.width = (pct * cw * ratio) + 'px';
+}
+
+function handleSliderMove(e) {
+  const rect = sliderCompare.getBoundingClientRect();
+  const cx = e.touches ? e.touches[0].clientX : e.clientX;
+  setSlider(Math.max(0, Math.min(1, (cx - rect.left) / rect.width)));
+}
+
+sliderCompare.addEventListener('mousedown', e => {
+  e.preventDefault();
+  document.addEventListener('mousemove', handleSliderMove);
+  document.addEventListener('mouseup', () => document.removeEventListener('mousemove', handleSliderMove), {once:true});
+});
+sliderCompare.addEventListener('touchstart', () => {
+  document.addEventListener('touchmove', handleSliderMove);
+  document.addEventListener('touchend',  () => document.removeEventListener('touchmove', handleSliderMove), {once:true});
+});
+
+let compareOpen = false;
+document.getElementById('toggleCompare').addEventListener('click', () => {
+  compareOpen = !compareOpen;
+  document.getElementById('comparePanel').style.display = compareOpen ? 'block' : 'none';
+  sliderCompare.style.display = compareOpen ? 'block' : 'none';
+  document.getElementById('toggleCompare').textContent = compareOpen ? '▼ Hide slide-compare' : '▶ Slide-compare view';
+  if (compareOpen) { const c = document.getElementById('cmpTop'); setSlider(0.5); }
+});
+
+window.addEventListener('resize', () => { if (compareOpen) { const c = document.getElementById('cmpTop'); setSlider(sliderPct); } });
+</script>
+</body>
+</html>
